@@ -75,9 +75,9 @@ func TestNew(t *testing.T) {
 				t.Errorf("len(GetMessages()) = %d, want %d", len(msgs), tt.wantMsgCount)
 			}
 
-			// Verify default allowed tools are set
-			if len(runner.allowedTools) != len(DefaultAllowedTools) {
-				t.Errorf("allowedTools count = %d, want %d", len(runner.allowedTools), len(DefaultAllowedTools))
+			// Verify allowed tools start empty (consumers build the full list)
+			if len(runner.allowedTools) != 0 {
+				t.Errorf("allowedTools count = %d, want 0 (empty by default)", len(runner.allowedTools))
 			}
 
 			// Verify MCP channels struct is created
@@ -97,37 +97,42 @@ func TestNew(t *testing.T) {
 func TestRunner_SetAllowedTools(t *testing.T) {
 	runner := New("session-1", "/tmp", "", false, nil)
 
-	initialCount := len(runner.allowedTools)
-
-	// Add new tools
-	runner.SetAllowedTools([]string{"Bash(git:*)", "Bash(npm:*)"})
-
-	if len(runner.allowedTools) != initialCount+2 {
-		t.Errorf("Expected %d tools, got %d", initialCount+2, len(runner.allowedTools))
+	// Initially empty
+	if len(runner.allowedTools) != 0 {
+		t.Errorf("Expected 0 initial tools, got %d", len(runner.allowedTools))
 	}
 
-	// Adding duplicates should not increase count
-	runner.SetAllowedTools([]string{"Bash(git:*)", "Read"})
-	if len(runner.allowedTools) != initialCount+2 {
-		t.Errorf("Expected %d tools after duplicate add, got %d", initialCount+2, len(runner.allowedTools))
+	// SetAllowedTools replaces the entire list
+	runner.SetAllowedTools([]string{"Bash(git:*)", "Bash(npm:*)"})
+	if len(runner.allowedTools) != 2 {
+		t.Errorf("Expected 2 tools, got %d", len(runner.allowedTools))
+	}
+
+	// SetAllowedTools replaces again (not merge)
+	runner.SetAllowedTools([]string{"Read", "Write", "Edit"})
+	if len(runner.allowedTools) != 3 {
+		t.Errorf("Expected 3 tools after replace, got %d", len(runner.allowedTools))
 	}
 }
 
 func TestRunner_AddAllowedTool(t *testing.T) {
 	runner := New("session-1", "/tmp", "", false, nil)
 
-	initialCount := len(runner.allowedTools)
+	// Initially empty
+	if len(runner.allowedTools) != 0 {
+		t.Errorf("Expected 0 initial tools, got %d", len(runner.allowedTools))
+	}
 
 	// Add a new tool
 	runner.AddAllowedTool("Bash(docker:*)")
-	if len(runner.allowedTools) != initialCount+1 {
-		t.Errorf("Expected %d tools, got %d", initialCount+1, len(runner.allowedTools))
+	if len(runner.allowedTools) != 1 {
+		t.Errorf("Expected 1 tool, got %d", len(runner.allowedTools))
 	}
 
 	// Adding the same tool again should not increase count
 	runner.AddAllowedTool("Bash(docker:*)")
-	if len(runner.allowedTools) != initialCount+1 {
-		t.Errorf("Expected %d tools after duplicate, got %d", initialCount+1, len(runner.allowedTools))
+	if len(runner.allowedTools) != 1 {
+		t.Errorf("Expected 1 tool after duplicate, got %d", len(runner.allowedTools))
 	}
 }
 
@@ -1566,24 +1571,24 @@ func TestExtractToolInputDescription_EmptyObject(t *testing.T) {
 	}
 }
 
-func TestRunner_DefaultAllowedToolsCopied(t *testing.T) {
+func TestRunner_AllowedToolsIndependent(t *testing.T) {
 	runner1 := New("session-1", "/tmp", "", false, nil)
 	runner2 := New("session-2", "/tmp", "", false, nil)
 
 	// Add tool to runner1
 	runner1.AddAllowedTool("CustomTool")
 
-	// runner2 should not have CustomTool
-	runner2Tools := make(map[string]bool)
-	runner2.SetAllowedTools([]string{}) // This won't add anything new
-	// Just verify they're independent instances
-
-	// The runner should have default tools
+	// Verify they're independent instances
 	if runner1 == runner2 {
 		t.Error("Runners should be different instances")
 	}
 
-	_ = runner2Tools // avoid unused variable warning
+	// runner2 should still have empty tools (AddAllowedTool on runner1 doesn't affect it)
+	runner2.mu.RLock()
+	if len(runner2.allowedTools) != 0 {
+		t.Errorf("runner2 should still have 0 tools, got %d", len(runner2.allowedTools))
+	}
+	runner2.mu.RUnlock()
 }
 
 func TestRunner_MessagesCopied(t *testing.T) {
@@ -3570,76 +3575,28 @@ func TestMCPChannels_SupervisorClose(t *testing.T) {
 	ch.Close()
 }
 
-func TestRunner_SetDaemonManaged(t *testing.T) {
+func TestRunner_SetSystemPrompt(t *testing.T) {
 	runner := New("session-1", "/tmp", "", false, nil)
 
-	// Initially false
+	// Initially empty
 	runner.mu.RLock()
-	if runner.daemonManaged {
-		t.Error("daemonManaged should be false initially")
+	if runner.systemPrompt != "" {
+		t.Error("systemPrompt should be empty initially")
 	}
 	runner.mu.RUnlock()
 
-	// Set to true
-	runner.SetDaemonManaged(true)
+	// Set a prompt
+	runner.SetSystemPrompt("test prompt")
 	runner.mu.RLock()
-	if !runner.daemonManaged {
-		t.Error("daemonManaged should be true after SetDaemonManaged(true)")
-	}
-	runner.mu.RUnlock()
-
-	// Set back to false
-	runner.SetDaemonManaged(false)
-	runner.mu.RLock()
-	if runner.daemonManaged {
-		t.Error("daemonManaged should be false after SetDaemonManaged(false)")
+	if runner.systemPrompt != "test prompt" {
+		t.Errorf("systemPrompt = %q, want %q", runner.systemPrompt, "test prompt")
 	}
 	runner.mu.RUnlock()
 }
 
-func TestRunner_DaemonManaged_PassedToProcessConfig(t *testing.T) {
-	runner := New("daemon-test", "/tmp", "", false, nil)
-	runner.SetDaemonManaged(true)
-
-	// Verify that ensureProcessRunning would pass daemonManaged to ProcessConfig.
-	// Since we can't easily start a real process, verify the runner field is set
-	// and that the ProcessConfig construction in ensureProcessRunning reads it.
-	runner.mu.RLock()
-	defer runner.mu.RUnlock()
-	if !runner.daemonManaged {
-		t.Error("expected daemonManaged to be set on runner")
-	}
-}
-
-func TestCodingAgentSystemPrompt(t *testing.T) {
-	if CodingAgentSystemPrompt == "" {
-		t.Error("CodingAgentSystemPrompt should not be empty")
-	}
-
-	// Should mention key instructions
-	if !strings.Contains(CodingAgentSystemPrompt, "autonomous coding agent") {
-		t.Error("CodingAgentSystemPrompt should identify as an autonomous coding agent")
-	}
-	if !strings.Contains(CodingAgentSystemPrompt, "DO NOT") {
-		t.Error("CodingAgentSystemPrompt should contain DO NOT instructions")
-	}
-	if !strings.Contains(CodingAgentSystemPrompt, "git push") {
-		t.Error("CodingAgentSystemPrompt should forbid git push")
-	}
-	if !strings.Contains(CodingAgentSystemPrompt, "create pull requests") {
-		t.Error("CodingAgentSystemPrompt should forbid creating PRs")
-	}
-
-	// Should be different from SupervisorSystemPrompt
-	if CodingAgentSystemPrompt == SupervisorSystemPrompt {
-		t.Error("CodingAgentSystemPrompt should be different from SupervisorSystemPrompt")
-	}
-}
-
-func TestMockRunner_SetDaemonManaged(t *testing.T) {
+func TestMockRunner_SetSystemPrompt(t *testing.T) {
 	runner := NewMockRunner("session-1", false, nil)
 
 	// Should not panic
-	runner.SetDaemonManaged(true)
-	runner.SetDaemonManaged(false)
+	runner.SetSystemPrompt("test prompt")
 }

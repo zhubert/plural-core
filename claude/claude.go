@@ -155,52 +155,6 @@ func GetDisplayContent(blocks []ContentBlock) string {
 	return strings.Join(parts, "\n")
 }
 
-// SupervisorSystemPrompt is appended to the system prompt for supervisor (orchestrator) sessions.
-// It provides delegation strategy and workflow instructions, and critically tells the supervisor
-// to STOP and wait for automatic notifications rather than polling with list_child_sessions.
-const SupervisorSystemPrompt = `You are an autonomous orchestrator session working on an issue or task.
-
-DELEGATION STRATEGY:
-You can EITHER work directly on the task yourself OR delegate to child sessions:
-- For SIMPLE tasks: Work directly yourself, OR create ONE child to do the entire task including tests
-- For COMPLEX tasks with truly independent work streams: Create multiple children to work in parallel
-- Default to fewer children - each child has overhead
-- Give each child a COMPLETE task description so they can work autonomously
-
-WORKFLOW IF WORKING DIRECTLY:
-1. Complete the task, including all necessary changes and tests
-2. Push changes with push_branch (this commits any uncommitted changes)
-3. Create a PR with create_pr
-
-WORKFLOW IF DELEGATING TO CHILDREN:
-1. Analyze the task complexity and parallelization potential
-2. Create child session(s) with create_child_session - include full context and acceptance criteria
-3. STOP and wait after creating children. You will automatically receive a notification message when each child completes. Do NOT poll with list_child_sessions - notifications are delivered to you as messages
-4. Once all children have completed (you will be told), merge with merge_child_to_parent
-5. Push changes with push_branch and create PR with create_pr
-
-CRITICAL: Regardless of whether you work directly or delegate, you MUST always push changes and create a PR when the work is complete. Use push_branch to commit and push, then create_pr to open the pull request.`
-
-// CodingAgentSystemPrompt is used for daemon-managed coding sessions instead of
-// SupervisorSystemPrompt. It tells Claude to focus on coding and explicitly NOT
-// attempt remote git operations, since the daemon workflow handles push/PR/merge.
-const CodingAgentSystemPrompt = `You are an autonomous coding agent working on a task.
-
-FOCUS: Write code, tests, and commit your changes locally.
-
-DO NOT:
-- Push branches or create pull requests — the system handles this automatically after you finish
-- Run "git push", "gh pr create", or any remote git operations
-- Look for or use push_branch, create_pr, or similar tools
-- Attempt to find git credentials or authenticate with GitHub
-
-WORKFLOW:
-1. Read and understand the task
-2. Implement the changes with clean, well-tested code
-3. Run tests to verify your changes work
-4. Commit your changes locally with a clear commit message
-5. Stop when the implementation is complete — the system will handle pushing and PR creation`
-
 // Runner manages a Claude Code CLI session.
 //
 // MCP Channel Architecture:
@@ -272,16 +226,12 @@ type Runner struct {
 	// Only used for autonomous supervisor sessions running inside containers
 	hostTools bool
 
-	// Daemon managed mode: when true, uses CodingAgentSystemPrompt instead of
-	// SupervisorSystemPrompt and suppresses host tools at the process level
-	daemonManaged bool
-
 	// Disable streaming chunks: when true, omits --include-partial-messages for less verbose output
 	// Useful for agent mode where real-time streaming is not needed
 	disableStreamingChunks bool
 
-	// Custom system prompt: appended after supervisor prompt
-	customSystemPrompt string
+	// System prompt: passed to Claude CLI via --append-system-prompt
+	systemPrompt string
 
 	// Container ready callback: invoked when containerized session receives init message
 	onContainerReady func()
@@ -296,9 +246,8 @@ func New(sessionID, workingDir, repoPath string, sessionStarted bool, initialMes
 	if msgs == nil {
 		msgs = []Message{}
 	}
-	// Copy default allowed tools
-	allowedTools := make([]string, len(DefaultAllowedTools))
-	copy(allowedTools, DefaultAllowedTools)
+	// Start with empty tools - consumers build the full list via SetAllowedTools
+	allowedTools := []string{}
 
 	// Open stream log file for raw Claude messages
 	var streamLogFile *os.File
@@ -337,17 +286,13 @@ func (r *Runner) SessionStarted() bool {
 	return r.sessionStarted
 }
 
-// SetAllowedTools merges additional tools with the existing allowed tools list.
-// This preserves defaults while adding any user-approved tools from config.
+// SetAllowedTools replaces the allowed tools list with the given tools.
+// Consumers are responsible for building the full list (e.g., DefaultAllowedTools + repo tools).
 func (r *Runner) SetAllowedTools(tools []string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for _, tool := range tools {
-		found := slices.Contains(r.allowedTools, tool)
-		if !found {
-			r.allowedTools = append(r.allowedTools, tool)
-		}
-	}
+	r.allowedTools = make([]string, len(tools))
+	copy(r.allowedTools, tools)
 }
 
 // AddAllowedTool adds a tool to the allowed list
@@ -398,21 +343,11 @@ func (r *Runner) SetDisableStreamingChunks(disable bool) {
 	r.log.Debug("set disable streaming chunks", "disabled", disable)
 }
 
-// SetDaemonManaged configures the runner for daemon-managed mode.
-// When enabled, the CodingAgentSystemPrompt is used instead of SupervisorSystemPrompt,
-// and host tools (create_pr, push_branch) are suppressed at the process level.
-func (r *Runner) SetDaemonManaged(managed bool) {
+// SetSystemPrompt sets the system prompt passed to Claude CLI via --append-system-prompt.
+func (r *Runner) SetSystemPrompt(prompt string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.daemonManaged = managed
-	r.log.Debug("set daemon managed mode", "managed", managed)
-}
-
-// SetCustomSystemPrompt sets a custom system prompt that will be appended after the supervisor prompt.
-func (r *Runner) SetCustomSystemPrompt(prompt string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.customSystemPrompt = prompt
+	r.systemPrompt = prompt
 }
 
 // PermissionRequestChan returns the channel for receiving permission requests.
@@ -873,9 +808,8 @@ func (r *Runner) ensureProcessRunning() error {
 		ContainerImage:         r.containerImage,
 		ContainerMCPPort:       containerMCPPort,
 		Supervisor:             r.supervisor,
-		DaemonManaged:          r.daemonManaged,
 		DisableStreamingChunks: r.disableStreamingChunks,
-		CustomSystemPrompt:     r.customSystemPrompt,
+		SystemPrompt:           r.systemPrompt,
 	}
 	copy(config.AllowedTools, r.allowedTools)
 
