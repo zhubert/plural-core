@@ -81,9 +81,9 @@ var DefaultAllowedTools = []string{
 	"Bash(pwd:*)",
 }
 
-// ContainerAllowedTools is a broad set of pre-authorized tools for containerized sessions.
+// containerAllowedTools is a broad set of pre-authorized tools for containerized sessions.
 // The container IS the sandbox, so all tools are safe to use without permission prompts.
-var ContainerAllowedTools = []string{
+var containerAllowedTools = []string{
 	"Read",
 	"Glob",
 	"Grep",

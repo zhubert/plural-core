@@ -289,7 +289,7 @@ func BuildCommandArgs(config ProcessConfig) []string {
 		}
 
 		// Pre-authorize all tools — the container is the sandbox
-		for _, tool := range ContainerAllowedTools {
+		for _, tool := range containerAllowedTools {
 			args = append(args, "--allowedTools", tool)
 		}
 	} else {
