@@ -56,13 +56,15 @@ func (c *Config) AddRepoMCPServer(repoPath string, server MCPServer) bool {
 		c.RepoMCP = make(map[string][]MCPServer)
 	}
 
+	resolved := resolveRepoPath(c.Repos, repoPath)
+
 	// Check for duplicate name in this repo
-	for _, s := range c.RepoMCP[repoPath] {
+	for _, s := range c.RepoMCP[resolved] {
 		if s.Name == server.Name {
 			return false
 		}
 	}
-	c.RepoMCP[repoPath] = append(c.RepoMCP[repoPath], server)
+	c.RepoMCP[resolved] = append(c.RepoMCP[resolved], server)
 	return true
 }
 
@@ -71,17 +73,19 @@ func (c *Config) RemoveRepoMCPServer(repoPath, name string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	servers, exists := c.RepoMCP[repoPath]
+	resolved := resolveRepoPath(c.Repos, repoPath)
+
+	servers, exists := c.RepoMCP[resolved]
 	if !exists {
 		return false
 	}
 
 	for i, s := range servers {
 		if s.Name == name {
-			c.RepoMCP[repoPath] = append(servers[:i], servers[i+1:]...)
+			c.RepoMCP[resolved] = append(servers[:i], servers[i+1:]...)
 			// Clean up empty map entries
-			if len(c.RepoMCP[repoPath]) == 0 {
-				delete(c.RepoMCP, repoPath)
+			if len(c.RepoMCP[resolved]) == 0 {
+				delete(c.RepoMCP, resolved)
 			}
 			return true
 		}
@@ -94,7 +98,8 @@ func (c *Config) GetRepoMCPServers(repoPath string) []MCPServer {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	servers := c.RepoMCP[repoPath]
+	resolved := resolveRepoPath(c.Repos, repoPath)
+	servers := c.RepoMCP[resolved]
 	result := make([]MCPServer, len(servers))
 	copy(result, servers)
 	return result
@@ -106,6 +111,8 @@ func (c *Config) GetMCPServersForRepo(repoPath string) []MCPServer {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
+	resolved := resolveRepoPath(c.Repos, repoPath)
+
 	// Start with global servers
 	serverMap := make(map[string]MCPServer)
 	for _, s := range c.MCPServers {
@@ -113,7 +120,7 @@ func (c *Config) GetMCPServersForRepo(repoPath string) []MCPServer {
 	}
 
 	// Override with per-repo servers
-	for _, s := range c.RepoMCP[repoPath] {
+	for _, s := range c.RepoMCP[resolved] {
 		serverMap[s.Name] = s
 	}
 
@@ -144,10 +151,12 @@ func (c *Config) AddRepoAllowedTool(repoPath, tool string) bool {
 		c.RepoAllowedTools = make(map[string][]string)
 	}
 
-	if slices.Contains(c.RepoAllowedTools[repoPath], tool) {
+	resolved := resolveRepoPath(c.Repos, repoPath)
+
+	if slices.Contains(c.RepoAllowedTools[resolved], tool) {
 		return false
 	}
-	c.RepoAllowedTools[repoPath] = append(c.RepoAllowedTools[repoPath], tool)
+	c.RepoAllowedTools[resolved] = append(c.RepoAllowedTools[resolved], tool)
 	return true
 }
 
@@ -156,12 +165,14 @@ func (c *Config) GetAllowedToolsForRepo(repoPath string) []string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
+	resolved := resolveRepoPath(c.Repos, repoPath)
+
 	// Use a map to deduplicate
 	toolSet := make(map[string]bool)
 	for _, t := range c.AllowedTools {
 		toolSet[t] = true
 	}
-	for _, t := range c.RepoAllowedTools[repoPath] {
+	for _, t := range c.RepoAllowedTools[resolved] {
 		toolSet[t] = true
 	}
 

@@ -2279,3 +2279,168 @@ func TestFormatTranscript_Order(t *testing.T) {
 		t.Error("expected user message before assistant message")
 	}
 }
+
+func TestConfig_AddRepo_SameFilesystemPath(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "repo")
+	if err := os.Mkdir(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	link := filepath.Join(dir, "repo-link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &Config{
+		Repos:    []string{},
+		Sessions: []Session{},
+	}
+
+	// Add via real path
+	if !cfg.AddRepo(target) {
+		t.Error("AddRepo should return true for new repo")
+	}
+
+	// Adding via symlink should detect as duplicate
+	if cfg.AddRepo(link) {
+		t.Error("AddRepo should return false for symlink to already-added repo")
+	}
+
+	if len(cfg.Repos) != 1 {
+		t.Errorf("Expected 1 repo, got %d", len(cfg.Repos))
+	}
+
+	// Test case variant on case-insensitive FS
+	variant := filepath.Join(dir, "REPO")
+	if _, err := os.Stat(variant); err == nil {
+		// FS is case-insensitive
+		if cfg.AddRepo(variant) {
+			t.Error("AddRepo should return false for case-variant on case-insensitive FS")
+		}
+		if len(cfg.Repos) != 1 {
+			t.Errorf("Expected 1 repo after case-variant attempt, got %d", len(cfg.Repos))
+		}
+	}
+}
+
+func TestConfig_RemoveRepo_SameFilesystemPath(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "repo")
+	if err := os.Mkdir(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	link := filepath.Join(dir, "repo-link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &Config{
+		Repos:    []string{target},
+		Sessions: []Session{},
+	}
+
+	// Remove via symlink (different string, same filesystem path)
+	if !cfg.RemoveRepo(link) {
+		t.Error("RemoveRepo should return true when removing via symlink to stored path")
+	}
+
+	if len(cfg.Repos) != 0 {
+		t.Errorf("Expected 0 repos after removal, got %d", len(cfg.Repos))
+	}
+}
+
+func TestConfig_PerRepoSettings_ResolvedPath(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "repo")
+	if err := os.Mkdir(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	link := filepath.Join(dir, "repo-link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &Config{
+		Repos:             []string{target},
+		Sessions:          []Session{},
+		RepoSquashOnMerge: make(map[string]bool),
+		RepoAsanaProject:  make(map[string]string),
+		RepoLinearTeam:    make(map[string]string),
+		RepoAllowedTools:  make(map[string][]string),
+		RepoMCP:           make(map[string][]MCPServer),
+		AllowedTools:      []string{},
+		MCPServers:        []MCPServer{},
+	}
+
+	// Set via stored path, get via symlink variant
+	cfg.SetSquashOnMerge(target, true)
+	if !cfg.GetSquashOnMerge(link) {
+		t.Error("GetSquashOnMerge via symlink should return value set via stored path")
+	}
+
+	// Set via symlink, get via stored path
+	cfg.SetAsanaProject(link, "project-123")
+	if cfg.GetAsanaProject(target) != "project-123" {
+		t.Errorf("GetAsanaProject via stored path should return value set via symlink, got %q",
+			cfg.GetAsanaProject(target))
+	}
+
+	// Linear team
+	cfg.SetLinearTeam(link, "team-abc")
+	if cfg.GetLinearTeam(target) != "team-abc" {
+		t.Errorf("GetLinearTeam via stored path should return value set via symlink, got %q",
+			cfg.GetLinearTeam(target))
+	}
+
+	// MCP servers
+	server := MCPServer{Name: "test-server", Command: "npx", Args: []string{"test"}}
+	if !cfg.AddRepoMCPServer(link, server) {
+		t.Error("AddRepoMCPServer via symlink should succeed")
+	}
+	servers := cfg.GetRepoMCPServers(target)
+	if len(servers) != 1 {
+		t.Errorf("GetRepoMCPServers via stored path should return server added via symlink, got %d", len(servers))
+	}
+
+	// Allowed tools
+	if !cfg.AddRepoAllowedTool(link, "Bash(git:*)") {
+		t.Error("AddRepoAllowedTool via symlink should succeed")
+	}
+	tools := cfg.GetAllowedToolsForRepo(target)
+	found := false
+	for _, tool := range tools {
+		if tool == "Bash(git:*)" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("GetAllowedToolsForRepo via stored path should include tool added via symlink")
+	}
+}
+
+func TestConfig_Validate_DuplicateRepoFilesystem(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "repo")
+	if err := os.Mkdir(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	link := filepath.Join(dir, "repo-link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &Config{
+		Repos:    []string{target, link}, // Same FS entry, different strings
+		Sessions: []Session{},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Error("Validate should detect filesystem-level duplicate repos")
+	}
+}
