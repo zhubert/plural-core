@@ -65,8 +65,7 @@ func NewMockRunner(sessionID string, sessionStarted bool, initialMessages []Mess
 	if msgs == nil {
 		msgs = []Message{}
 	}
-	allowedTools := make([]string, len(DefaultAllowedTools))
-	copy(allowedTools, DefaultAllowedTools)
+	allowedTools := []string{}
 
 	return &MockRunner{
 		sessionID:      sessionID,
@@ -330,11 +329,8 @@ func (m *MockRunner) GetResponseChan() <-chan ResponseChunk {
 func (m *MockRunner) SetAllowedTools(tools []string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for _, tool := range tools {
-		if !slices.Contains(m.allowedTools, tool) {
-			m.allowedTools = append(m.allowedTools, tool)
-		}
-	}
+	m.allowedTools = make([]string, len(tools))
+	copy(m.allowedTools, tools)
 }
 
 // AddAllowedTool implements RunnerInterface.
@@ -386,13 +382,8 @@ func (m *MockRunner) SetDisableStreamingChunks(disable bool) {
 	// No-op for mock
 }
 
-// SetCustomSystemPrompt implements RunnerInterface.
-func (m *MockRunner) SetCustomSystemPrompt(prompt string) {
-	// No-op for mock
-}
-
-// SetDaemonManaged implements RunnerInterface.
-func (m *MockRunner) SetDaemonManaged(managed bool) {
+// SetSystemPrompt implements RunnerInterface.
+func (m *MockRunner) SetSystemPrompt(prompt string) {
 	// No-op for mock
 }
 

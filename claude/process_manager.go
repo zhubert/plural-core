@@ -76,10 +76,9 @@ type ProcessConfig struct {
 	Containerized          bool   // When true, wraps Claude CLI in a container
 	ContainerImage         string // Container image name (e.g., "ghcr.io/zhubert/plural-claude")
 	ContainerMCPPort       int    // Port the MCP subprocess listens on inside the container (published via -p 0:port)
-	Supervisor             bool   // When true, appends supervisor instructions to system prompt
-	DaemonManaged          bool   // When true, uses CodingAgentSystemPrompt instead of SupervisorSystemPrompt (daemon handles push/PR/merge)
+	Supervisor             bool   // When true, adds --supervisor flag to Claude CLI args
 	DisableStreamingChunks bool   // When true, omits --include-partial-messages for less verbose output (useful for agent mode)
-	CustomSystemPrompt     string // When set, appended after the supervisor prompt via --append-system-prompt
+	SystemPrompt           string // When set, passed to Claude CLI via --append-system-prompt
 }
 
 // ProcessCallbacks defines callbacks that the ProcessManager invokes during operation.
@@ -257,23 +256,6 @@ func BuildCommandArgs(config ProcessConfig) []string {
 		}
 	}
 
-	// Build system prompt: supervisor instructions + custom prompt if applicable
-	// For daemon-managed sessions, use CodingAgentSystemPrompt instead of SupervisorSystemPrompt
-	// because the daemon workflow handles push/PR/merge operations
-	systemPrompt := ""
-	if config.DaemonManaged && config.Supervisor {
-		systemPrompt = CodingAgentSystemPrompt
-	} else if config.Supervisor {
-		systemPrompt = SupervisorSystemPrompt
-	}
-	if config.CustomSystemPrompt != "" {
-		if systemPrompt != "" {
-			systemPrompt += "\n\n" + config.CustomSystemPrompt
-		} else {
-			systemPrompt = config.CustomSystemPrompt
-		}
-	}
-
 	if config.Containerized {
 		// Container IS the sandbox. When MCP config is available, use --permission-prompt-tool
 		// with a wildcard MCP server (--auto-approve) that auto-approves all regular permissions
@@ -289,8 +271,8 @@ func BuildCommandArgs(config ProcessConfig) []string {
 			// Fallback if MCP server didn't start — use dangerously-skip-permissions
 			args = append(args, "--dangerously-skip-permissions")
 		}
-		if systemPrompt != "" {
-			args = append(args, "--append-system-prompt", systemPrompt)
+		if config.SystemPrompt != "" {
+			args = append(args, "--append-system-prompt", config.SystemPrompt)
 		}
 
 		// Pre-authorize all tools — the container is the sandbox
@@ -303,8 +285,8 @@ func BuildCommandArgs(config ProcessConfig) []string {
 			"--mcp-config", config.MCPConfigPath,
 			"--permission-prompt-tool", "mcp__plural__permission",
 		)
-		if systemPrompt != "" {
-			args = append(args, "--append-system-prompt", systemPrompt)
+		if config.SystemPrompt != "" {
+			args = append(args, "--append-system-prompt", config.SystemPrompt)
 		}
 
 		// Add pre-allowed tools

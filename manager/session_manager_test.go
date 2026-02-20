@@ -403,11 +403,10 @@ func TestSessionManager_AddAllowedTool_NoRunner(t *testing.T) {
 	sm.AddAllowedTool("session-1", "Bash(git:*)")
 }
 
-// trackingMockRunner tracks SetForkFromSession and SetDaemonManaged calls for testing
+// trackingMockRunner tracks SetForkFromSession and SetHostTools calls for testing
 type trackingMockRunner struct {
 	*claude.MockRunner
 	forkFromSessionID string
-	daemonManaged     bool
 	hostToolsEnabled  bool
 }
 
@@ -419,10 +418,6 @@ func newTrackingMockRunner(sessionID string, sessionStarted bool, msgs []claude.
 
 func (m *trackingMockRunner) SetForkFromSession(parentSessionID string) {
 	m.forkFromSessionID = parentSessionID
-}
-
-func (m *trackingMockRunner) SetDaemonManaged(managed bool) {
-	m.daemonManaged = managed
 }
 
 func (m *trackingMockRunner) SetHostTools(hostTools bool) {
@@ -1099,11 +1094,6 @@ func TestSessionManager_DaemonManaged_SkipsHostTools(t *testing.T) {
 	if trackingRunner.hostToolsEnabled {
 		t.Error("daemon-managed session should NOT have host tools enabled")
 	}
-
-	// DaemonManaged should be set
-	if !trackingRunner.daemonManaged {
-		t.Error("daemon-managed session should have SetDaemonManaged(true) called")
-	}
 }
 
 func TestSessionManager_NonDaemonManaged_GetsHostTools(t *testing.T) {
@@ -1143,10 +1133,5 @@ func TestSessionManager_NonDaemonManaged_GetsHostTools(t *testing.T) {
 	// Host tools SHOULD be enabled for non-daemon-managed autonomous supervisors
 	if !trackingRunner.hostToolsEnabled {
 		t.Error("non-daemon-managed autonomous supervisor session SHOULD have host tools enabled")
-	}
-
-	// DaemonManaged should NOT be set
-	if trackingRunner.daemonManaged {
-		t.Error("non-daemon-managed session should NOT have SetDaemonManaged(true) called")
 	}
 }

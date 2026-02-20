@@ -362,23 +362,20 @@ func (sm *SessionManager) GetOrCreateRunner(sess *config.Session) claude.RunnerI
 		}
 	}
 
-	// Load allowed tools from config (global + per-repo)
-	allowedTools := sm.config.GetAllowedToolsForRepo(sess.RepoPath)
-	if len(allowedTools) > 0 {
-		log.Debug("loaded allowed tools", "count", len(allowedTools), "repo", sess.RepoPath)
-		runner.SetAllowedTools(allowedTools)
+	// Build the full allowed tools list: defaults + per-repo config
+	tools := make([]string, len(claude.DefaultAllowedTools))
+	copy(tools, claude.DefaultAllowedTools)
+	repoTools := sm.config.GetAllowedToolsForRepo(sess.RepoPath)
+	if len(repoTools) > 0 {
+		log.Debug("loaded allowed tools", "count", len(repoTools), "repo", sess.RepoPath)
+		tools = append(tools, repoTools...)
 	}
+	runner.SetAllowedTools(tools)
 
 	// Configure supervisor mode if this is a supervisor session
 	if sess.IsSupervisor {
 		runner.SetSupervisor(true)
 		log.Debug("supervisor session, supervisor MCP tools enabled")
-	}
-
-	// Configure daemon-managed mode — uses CodingAgentSystemPrompt and suppresses host tools
-	if sess.DaemonManaged {
-		runner.SetDaemonManaged(true)
-		log.Debug("daemon-managed session, host tools suppressed")
 	}
 
 	// Enable host tools for autonomous supervisors (create_pr, push_branch)
