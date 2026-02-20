@@ -403,10 +403,12 @@ func TestSessionManager_AddAllowedTool_NoRunner(t *testing.T) {
 	sm.AddAllowedTool("session-1", "Bash(git:*)")
 }
 
-// trackingMockRunner tracks SetForkFromSession calls for testing
+// trackingMockRunner tracks SetForkFromSession and SetDaemonManaged calls for testing
 type trackingMockRunner struct {
 	*claude.MockRunner
 	forkFromSessionID string
+	daemonManaged     bool
+	hostToolsEnabled  bool
 }
 
 func newTrackingMockRunner(sessionID string, sessionStarted bool, msgs []claude.Message) *trackingMockRunner {
@@ -417,6 +419,15 @@ func newTrackingMockRunner(sessionID string, sessionStarted bool, msgs []claude.
 
 func (m *trackingMockRunner) SetForkFromSession(parentSessionID string) {
 	m.forkFromSessionID = parentSessionID
+}
+
+func (m *trackingMockRunner) SetDaemonManaged(managed bool) {
+	m.daemonManaged = managed
+}
+
+func (m *trackingMockRunner) SetHostTools(hostTools bool) {
+	m.hostToolsEnabled = hostTools
+	m.MockRunner.SetHostTools(hostTools)
 }
 
 func TestSessionManager_Select_ForkedSession(t *testing.T) {
@@ -1047,5 +1058,95 @@ func TestSessionManager_SaveRunnerMessages_Error(t *testing.T) {
 	err := sm.SaveRunnerMessages("session-1", runner)
 	if err == nil {
 		t.Error("SaveRunnerMessages should return error when write fails")
+	}
+}
+
+func TestSessionManager_DaemonManaged_SkipsHostTools(t *testing.T) {
+	// A daemon-managed autonomous supervisor session should NOT get host tools
+	cfg := &config.Config{
+		Repos: []string{"/test/repo"},
+		Sessions: []config.Session{
+			{
+				ID:            "daemon-session",
+				RepoPath:      "/test/repo",
+				WorkTree:      "/test/worktree",
+				Branch:        "plural-test",
+				Name:          "repo/session1",
+				Started:       false,
+				Autonomous:    true,
+				IsSupervisor:  true,
+				DaemonManaged: true,
+			},
+		},
+		AllowedTools:     []string{},
+		RepoAllowedTools: make(map[string][]string),
+	}
+	sm := NewSessionManager(cfg, git.NewGitService())
+
+	sm.SetRunnerFactory(func(sessionID, workingDir, repoPath string, sessionStarted bool, initialMessages []claude.Message) claude.RunnerInterface {
+		return newTrackingMockRunner(sessionID, sessionStarted, initialMessages)
+	})
+
+	sess := sm.GetSession("daemon-session")
+	result := sm.Select(sess, "", "", "")
+
+	trackingRunner, ok := result.Runner.(*trackingMockRunner)
+	if !ok {
+		t.Fatal("Expected trackingMockRunner")
+	}
+
+	// Host tools should NOT be enabled for daemon-managed sessions
+	if trackingRunner.hostToolsEnabled {
+		t.Error("daemon-managed session should NOT have host tools enabled")
+	}
+
+	// DaemonManaged should be set
+	if !trackingRunner.daemonManaged {
+		t.Error("daemon-managed session should have SetDaemonManaged(true) called")
+	}
+}
+
+func TestSessionManager_NonDaemonManaged_GetsHostTools(t *testing.T) {
+	// A non-daemon-managed autonomous supervisor session SHOULD get host tools
+	cfg := &config.Config{
+		Repos: []string{"/test/repo"},
+		Sessions: []config.Session{
+			{
+				ID:            "normal-session",
+				RepoPath:      "/test/repo",
+				WorkTree:      "/test/worktree",
+				Branch:        "plural-test",
+				Name:          "repo/session1",
+				Started:       false,
+				Autonomous:    true,
+				IsSupervisor:  true,
+				DaemonManaged: false,
+			},
+		},
+		AllowedTools:     []string{},
+		RepoAllowedTools: make(map[string][]string),
+	}
+	sm := NewSessionManager(cfg, git.NewGitService())
+
+	sm.SetRunnerFactory(func(sessionID, workingDir, repoPath string, sessionStarted bool, initialMessages []claude.Message) claude.RunnerInterface {
+		return newTrackingMockRunner(sessionID, sessionStarted, initialMessages)
+	})
+
+	sess := sm.GetSession("normal-session")
+	result := sm.Select(sess, "", "", "")
+
+	trackingRunner, ok := result.Runner.(*trackingMockRunner)
+	if !ok {
+		t.Fatal("Expected trackingMockRunner")
+	}
+
+	// Host tools SHOULD be enabled for non-daemon-managed autonomous supervisors
+	if !trackingRunner.hostToolsEnabled {
+		t.Error("non-daemon-managed autonomous supervisor session SHOULD have host tools enabled")
+	}
+
+	// DaemonManaged should NOT be set
+	if trackingRunner.daemonManaged {
+		t.Error("non-daemon-managed session should NOT have SetDaemonManaged(true) called")
 	}
 }

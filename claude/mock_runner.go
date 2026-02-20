@@ -391,6 +391,11 @@ func (m *MockRunner) SetCustomSystemPrompt(prompt string) {
 	// No-op for mock
 }
 
+// SetDaemonManaged implements RunnerInterface.
+func (m *MockRunner) SetDaemonManaged(managed bool) {
+	// No-op for mock
+}
+
 // PermissionRequestChan implements RunnerInterface.
 func (m *MockRunner) PermissionRequestChan() <-chan mcp.PermissionRequest {
 	m.mu.RLock()

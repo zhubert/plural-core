@@ -2854,3 +2854,84 @@ func TestIsChannelClosed(t *testing.T) {
 		t.Error("closed channel should be reported as closed")
 	}
 }
+
+func TestBuildCommandArgs_DaemonManaged_UsesCodingAgentPrompt(t *testing.T) {
+	config := ProcessConfig{
+		SessionID:      "daemon-session",
+		WorkingDir:     "/tmp",
+		SessionStarted: false,
+		MCPConfigPath:  "/tmp/mcp.json",
+		AllowedTools:   []string{"Read"},
+		Supervisor:     true,
+		DaemonManaged:  true,
+	}
+
+	args := BuildCommandArgs(config)
+
+	systemPrompt := getArgValue(args, "--append-system-prompt")
+	if systemPrompt == "" {
+		t.Fatal("expected --append-system-prompt to be set for daemon-managed supervisor sessions")
+	}
+
+	// Should use CodingAgentSystemPrompt, NOT SupervisorSystemPrompt
+	if strings.Contains(systemPrompt, "orchestrator session") {
+		t.Error("daemon-managed session should NOT contain SupervisorSystemPrompt content")
+	}
+	if !strings.Contains(systemPrompt, "autonomous coding agent") {
+		t.Error("daemon-managed session should contain CodingAgentSystemPrompt content")
+	}
+	if !strings.Contains(systemPrompt, "DO NOT") {
+		t.Error("daemon-managed session should contain DO NOT instructions")
+	}
+	if !strings.Contains(systemPrompt, "git push") {
+		t.Error("daemon-managed session should explicitly forbid git push")
+	}
+}
+
+func TestBuildCommandArgs_DaemonManaged_NonSupervisor(t *testing.T) {
+	// DaemonManaged but NOT supervisor — should have no system prompt
+	config := ProcessConfig{
+		SessionID:      "daemon-session-nosup",
+		WorkingDir:     "/tmp",
+		SessionStarted: false,
+		MCPConfigPath:  "/tmp/mcp.json",
+		AllowedTools:   []string{"Read"},
+		Supervisor:     false,
+		DaemonManaged:  true,
+	}
+
+	args := BuildCommandArgs(config)
+
+	systemPrompt := getArgValue(args, "--append-system-prompt")
+	if systemPrompt != "" {
+		t.Errorf("non-supervisor daemon-managed session should NOT have --append-system-prompt, got %q", systemPrompt)
+	}
+}
+
+func TestBuildCommandArgs_DaemonManaged_Containerized(t *testing.T) {
+	config := ProcessConfig{
+		SessionID:      "daemon-container",
+		WorkingDir:     "/tmp/worktree",
+		SessionStarted: false,
+		MCPConfigPath:  "/tmp/mcp.json",
+		Containerized:  true,
+		ContainerImage: "my-image",
+		Supervisor:     true,
+		DaemonManaged:  true,
+	}
+
+	args := BuildCommandArgs(config)
+
+	systemPrompt := getArgValue(args, "--append-system-prompt")
+	if systemPrompt == "" {
+		t.Fatal("expected --append-system-prompt to be set")
+	}
+
+	// Containerized daemon-managed supervisor should still use CodingAgentSystemPrompt
+	if strings.Contains(systemPrompt, "DELEGATION STRATEGY") {
+		t.Error("containerized daemon-managed session should NOT contain SupervisorSystemPrompt content")
+	}
+	if !strings.Contains(systemPrompt, "autonomous coding agent") {
+		t.Error("containerized daemon-managed session should contain CodingAgentSystemPrompt content")
+	}
+}
