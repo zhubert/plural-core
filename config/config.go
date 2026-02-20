@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"sync"
 
 	"github.com/zhubert/plural-core/paths"
@@ -156,16 +155,16 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	// Check for duplicate repos
-	seenRepos := make(map[string]bool)
-	for _, repo := range c.Repos {
+	// Check for duplicate repos (filesystem-aware: handles case, symlinks)
+	for i, repo := range c.Repos {
 		if repo == "" {
 			return fmt.Errorf("empty repo path found")
 		}
-		if seenRepos[repo] {
-			return fmt.Errorf("duplicate repo: %s", repo)
+		for j := i + 1; j < len(c.Repos); j++ {
+			if SamePath(repo, c.Repos[j]) {
+				return fmt.Errorf("duplicate repo: %s", repo)
+			}
 		}
-		seenRepos[repo] = true
 	}
 
 	return nil
@@ -211,9 +210,11 @@ func (c *Config) AddRepo(path string) bool {
 		absPath = path
 	}
 
-	// Check if already exists
-	if slices.Contains(c.Repos, absPath) {
-		return false
+	// Check if already exists (filesystem-aware: handles case, symlinks)
+	for _, r := range c.Repos {
+		if SamePath(r, absPath) {
+			return false
+		}
 	}
 
 	c.Repos = append(c.Repos, absPath)
@@ -227,7 +228,7 @@ func (c *Config) RemoveRepo(path string) bool {
 	defer c.mu.Unlock()
 
 	for i, r := range c.Repos {
-		if r == path {
+		if SamePath(r, path) {
 			c.Repos = append(c.Repos[:i], c.Repos[i+1:]...)
 			return true
 		}
@@ -363,7 +364,8 @@ func (c *Config) GetSquashOnMerge(repoPath string) bool {
 	if c.RepoSquashOnMerge == nil {
 		return false
 	}
-	return c.RepoSquashOnMerge[repoPath]
+	resolved := resolveRepoPath(c.Repos, repoPath)
+	return c.RepoSquashOnMerge[resolved]
 }
 
 // SetSquashOnMerge sets whether squash-on-merge is enabled for a repo
@@ -373,10 +375,11 @@ func (c *Config) SetSquashOnMerge(repoPath string, enabled bool) {
 	if c.RepoSquashOnMerge == nil {
 		c.RepoSquashOnMerge = make(map[string]bool)
 	}
+	resolved := resolveRepoPath(c.Repos, repoPath)
 	if enabled {
-		c.RepoSquashOnMerge[repoPath] = true
+		c.RepoSquashOnMerge[resolved] = true
 	} else {
-		delete(c.RepoSquashOnMerge, repoPath)
+		delete(c.RepoSquashOnMerge, resolved)
 	}
 }
 
@@ -387,7 +390,8 @@ func (c *Config) GetAsanaProject(repoPath string) string {
 	if c.RepoAsanaProject == nil {
 		return ""
 	}
-	return c.RepoAsanaProject[repoPath]
+	resolved := resolveRepoPath(c.Repos, repoPath)
+	return c.RepoAsanaProject[resolved]
 }
 
 // SetAsanaProject sets the Asana project GID for a repo
@@ -397,10 +401,11 @@ func (c *Config) SetAsanaProject(repoPath, projectGID string) {
 	if c.RepoAsanaProject == nil {
 		c.RepoAsanaProject = make(map[string]string)
 	}
+	resolved := resolveRepoPath(c.Repos, repoPath)
 	if projectGID == "" {
-		delete(c.RepoAsanaProject, repoPath)
+		delete(c.RepoAsanaProject, resolved)
 	} else {
-		c.RepoAsanaProject[repoPath] = projectGID
+		c.RepoAsanaProject[resolved] = projectGID
 	}
 }
 
@@ -416,7 +421,8 @@ func (c *Config) GetLinearTeam(repoPath string) string {
 	if c.RepoLinearTeam == nil {
 		return ""
 	}
-	return c.RepoLinearTeam[repoPath]
+	resolved := resolveRepoPath(c.Repos, repoPath)
+	return c.RepoLinearTeam[resolved]
 }
 
 // SetLinearTeam sets the Linear team ID for a repo
@@ -426,10 +432,11 @@ func (c *Config) SetLinearTeam(repoPath, teamID string) {
 	if c.RepoLinearTeam == nil {
 		c.RepoLinearTeam = make(map[string]string)
 	}
+	resolved := resolveRepoPath(c.Repos, repoPath)
 	if teamID == "" {
-		delete(c.RepoLinearTeam, repoPath)
+		delete(c.RepoLinearTeam, resolved)
 	} else {
-		c.RepoLinearTeam[repoPath] = teamID
+		c.RepoLinearTeam[resolved] = teamID
 	}
 }
 
