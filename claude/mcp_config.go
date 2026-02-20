@@ -205,6 +205,9 @@ func (r *Runner) createContainerMCPConfigLocked(containerPort int) (string, erro
 		// Fall back to temp dir if config dir is unavailable
 		configDir = os.TempDir()
 	}
+	if err := os.MkdirAll(configDir, 0700); err != nil {
+		return "", fmt.Errorf("create config dir: %w", err)
+	}
 	configPath := filepath.Join(configDir, fmt.Sprintf("plural-mcp-%s.json", r.sessionID))
 	if err := os.WriteFile(configPath, configJSON, 0600); err != nil {
 		return "", err
