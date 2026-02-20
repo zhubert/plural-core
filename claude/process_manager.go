@@ -77,6 +77,7 @@ type ProcessConfig struct {
 	ContainerImage         string // Container image name (e.g., "ghcr.io/zhubert/plural-claude")
 	ContainerMCPPort       int    // Port the MCP subprocess listens on inside the container (published via -p 0:port)
 	Supervisor             bool   // When true, appends supervisor instructions to system prompt
+	DaemonManaged          bool   // When true, uses CodingAgentSystemPrompt instead of SupervisorSystemPrompt (daemon handles push/PR/merge)
 	DisableStreamingChunks bool   // When true, omits --include-partial-messages for less verbose output (useful for agent mode)
 	CustomSystemPrompt     string // When set, appended after the supervisor prompt via --append-system-prompt
 }
@@ -257,8 +258,12 @@ func BuildCommandArgs(config ProcessConfig) []string {
 	}
 
 	// Build system prompt: supervisor instructions + custom prompt if applicable
+	// For daemon-managed sessions, use CodingAgentSystemPrompt instead of SupervisorSystemPrompt
+	// because the daemon workflow handles push/PR/merge operations
 	systemPrompt := ""
-	if config.Supervisor {
+	if config.DaemonManaged && config.Supervisor {
+		systemPrompt = CodingAgentSystemPrompt
+	} else if config.Supervisor {
 		systemPrompt = SupervisorSystemPrompt
 	}
 	if config.CustomSystemPrompt != "" {

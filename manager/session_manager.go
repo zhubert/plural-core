@@ -375,8 +375,15 @@ func (sm *SessionManager) GetOrCreateRunner(sess *config.Session) claude.RunnerI
 		log.Debug("supervisor session, supervisor MCP tools enabled")
 	}
 
+	// Configure daemon-managed mode — uses CodingAgentSystemPrompt and suppresses host tools
+	if sess.DaemonManaged {
+		runner.SetDaemonManaged(true)
+		log.Debug("daemon-managed session, host tools suppressed")
+	}
+
 	// Enable host tools for autonomous supervisors (create_pr, push_branch)
-	if sess.IsSupervisor && sess.Autonomous {
+	// Skip for daemon-managed sessions — the daemon workflow handles push/PR/merge
+	if sess.IsSupervisor && sess.Autonomous && !sess.DaemonManaged {
 		runner.SetHostTools(true)
 		log.Debug("autonomous supervisor, host tools enabled")
 	}

@@ -181,6 +181,26 @@ WORKFLOW IF DELEGATING TO CHILDREN:
 
 CRITICAL: Regardless of whether you work directly or delegate, you MUST always push changes and create a PR when the work is complete. Use push_branch to commit and push, then create_pr to open the pull request.`
 
+// CodingAgentSystemPrompt is used for daemon-managed coding sessions instead of
+// SupervisorSystemPrompt. It tells Claude to focus on coding and explicitly NOT
+// attempt remote git operations, since the daemon workflow handles push/PR/merge.
+const CodingAgentSystemPrompt = `You are an autonomous coding agent working on a task.
+
+FOCUS: Write code, tests, and commit your changes locally.
+
+DO NOT:
+- Push branches or create pull requests — the system handles this automatically after you finish
+- Run "git push", "gh pr create", or any remote git operations
+- Look for or use push_branch, create_pr, or similar tools
+- Attempt to find git credentials or authenticate with GitHub
+
+WORKFLOW:
+1. Read and understand the task
+2. Implement the changes with clean, well-tested code
+3. Run tests to verify your changes work
+4. Commit your changes locally with a clear commit message
+5. Stop when the implementation is complete — the system will handle pushing and PR creation`
+
 // Runner manages a Claude Code CLI session.
 //
 // MCP Channel Architecture:
@@ -251,6 +271,10 @@ type Runner struct {
 	// Host tools mode: when true, expose create_pr and push_branch MCP tools
 	// Only used for autonomous supervisor sessions running inside containers
 	hostTools bool
+
+	// Daemon managed mode: when true, uses CodingAgentSystemPrompt instead of
+	// SupervisorSystemPrompt and suppresses host tools at the process level
+	daemonManaged bool
 
 	// Disable streaming chunks: when true, omits --include-partial-messages for less verbose output
 	// Useful for agent mode where real-time streaming is not needed
@@ -372,6 +396,16 @@ func (r *Runner) SetDisableStreamingChunks(disable bool) {
 	defer r.mu.Unlock()
 	r.disableStreamingChunks = disable
 	r.log.Debug("set disable streaming chunks", "disabled", disable)
+}
+
+// SetDaemonManaged configures the runner for daemon-managed mode.
+// When enabled, the CodingAgentSystemPrompt is used instead of SupervisorSystemPrompt,
+// and host tools (create_pr, push_branch) are suppressed at the process level.
+func (r *Runner) SetDaemonManaged(managed bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.daemonManaged = managed
+	r.log.Debug("set daemon managed mode", "managed", managed)
 }
 
 // SetCustomSystemPrompt sets a custom system prompt that will be appended after the supervisor prompt.
@@ -839,6 +873,7 @@ func (r *Runner) ensureProcessRunning() error {
 		ContainerImage:         r.containerImage,
 		ContainerMCPPort:       containerMCPPort,
 		Supervisor:             r.supervisor,
+		DaemonManaged:          r.daemonManaged,
 		DisableStreamingChunks: r.disableStreamingChunks,
 		CustomSystemPrompt:     r.customSystemPrompt,
 	}

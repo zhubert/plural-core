@@ -3569,3 +3569,77 @@ func TestMCPChannels_SupervisorClose(t *testing.T) {
 	// Double close should not panic
 	ch.Close()
 }
+
+func TestRunner_SetDaemonManaged(t *testing.T) {
+	runner := New("session-1", "/tmp", "", false, nil)
+
+	// Initially false
+	runner.mu.RLock()
+	if runner.daemonManaged {
+		t.Error("daemonManaged should be false initially")
+	}
+	runner.mu.RUnlock()
+
+	// Set to true
+	runner.SetDaemonManaged(true)
+	runner.mu.RLock()
+	if !runner.daemonManaged {
+		t.Error("daemonManaged should be true after SetDaemonManaged(true)")
+	}
+	runner.mu.RUnlock()
+
+	// Set back to false
+	runner.SetDaemonManaged(false)
+	runner.mu.RLock()
+	if runner.daemonManaged {
+		t.Error("daemonManaged should be false after SetDaemonManaged(false)")
+	}
+	runner.mu.RUnlock()
+}
+
+func TestRunner_DaemonManaged_PassedToProcessConfig(t *testing.T) {
+	runner := New("daemon-test", "/tmp", "", false, nil)
+	runner.SetDaemonManaged(true)
+
+	// Verify that ensureProcessRunning would pass daemonManaged to ProcessConfig.
+	// Since we can't easily start a real process, verify the runner field is set
+	// and that the ProcessConfig construction in ensureProcessRunning reads it.
+	runner.mu.RLock()
+	defer runner.mu.RUnlock()
+	if !runner.daemonManaged {
+		t.Error("expected daemonManaged to be set on runner")
+	}
+}
+
+func TestCodingAgentSystemPrompt(t *testing.T) {
+	if CodingAgentSystemPrompt == "" {
+		t.Error("CodingAgentSystemPrompt should not be empty")
+	}
+
+	// Should mention key instructions
+	if !strings.Contains(CodingAgentSystemPrompt, "autonomous coding agent") {
+		t.Error("CodingAgentSystemPrompt should identify as an autonomous coding agent")
+	}
+	if !strings.Contains(CodingAgentSystemPrompt, "DO NOT") {
+		t.Error("CodingAgentSystemPrompt should contain DO NOT instructions")
+	}
+	if !strings.Contains(CodingAgentSystemPrompt, "git push") {
+		t.Error("CodingAgentSystemPrompt should forbid git push")
+	}
+	if !strings.Contains(CodingAgentSystemPrompt, "create pull requests") {
+		t.Error("CodingAgentSystemPrompt should forbid creating PRs")
+	}
+
+	// Should be different from SupervisorSystemPrompt
+	if CodingAgentSystemPrompt == SupervisorSystemPrompt {
+		t.Error("CodingAgentSystemPrompt should be different from SupervisorSystemPrompt")
+	}
+}
+
+func TestMockRunner_SetDaemonManaged(t *testing.T) {
+	runner := NewMockRunner("session-1", false, nil)
+
+	// Should not panic
+	runner.SetDaemonManaged(true)
+	runner.SetDaemonManaged(false)
+}

@@ -31,6 +31,7 @@ type RunnerInterface interface {
 	SetOnContainerReady(callback func())
 	SetDisableStreamingChunks(disable bool)
 	SetCustomSystemPrompt(prompt string)
+	SetDaemonManaged(managed bool)
 
 	// Permission/Question/Plan channels
 	PermissionRequestChan() <-chan mcp.PermissionRequest

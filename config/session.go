@@ -39,6 +39,7 @@ type Session struct {
 	PRCommentsAddressedCount  int       `json:"pr_comments_addressed_count,omitempty"`  // Comment count last addressed by Claude for merge
 	Autonomous       bool      `json:"autonomous,omitempty"`         // Whether this session runs in autonomous mode (no user prompts)
 	IsSupervisor     bool      `json:"is_supervisor,omitempty"`      // Whether this session is a supervisor session
+	DaemonManaged    bool      `json:"daemon_managed,omitempty"`     // Whether this session is managed by the daemon (suppresses host tools and supervisor prompt)
 	SupervisorID     string    `json:"supervisor_id,omitempty"`      // ID of supervisor session (for child sessions)
 	ChildSessionIDs  []string  `json:"child_session_ids,omitempty"`  // IDs of child sessions (for supervisor sessions)
 }
