@@ -520,15 +520,31 @@ func (s *GitService) GeneratePRTitleAndBodyWithIssueRef(ctx context.Context, rep
 		log.Debug("baseBranch empty, using default", "defaultBranch", baseBranch)
 	}
 
+	// Use origin/<baseBranch> for git comparisons so we compare against the
+	// remote state, not a potentially stale local branch. The daemon creates
+	// session branches from origin/<default>, so comparing against the local
+	// branch would include unrelated commits if local main has fallen behind.
+	// We fetch first to ensure origin/<baseBranch> is current.
+	comparisonRef := baseBranch
+	_, fetchErr := s.executor.CombinedOutput(ctx, repoPath, "git", "fetch", "origin", baseBranch)
+	if fetchErr == nil {
+		candidateRef := fmt.Sprintf("origin/%s", baseBranch)
+		_, _, verifyErr := s.executor.Run(ctx, repoPath, "git", "rev-parse", "--verify", candidateRef)
+		if verifyErr == nil {
+			comparisonRef = candidateRef
+			log.Debug("using remote ref for PR comparison", "ref", comparisonRef)
+		}
+	}
+
 	// Get the commit log for this branch
-	commitLog, err := s.executor.Output(ctx, repoPath, "git", "log", fmt.Sprintf("%s..%s", baseBranch, branch), "--oneline")
+	commitLog, err := s.executor.Output(ctx, repoPath, "git", "log", fmt.Sprintf("%s..%s", comparisonRef, branch), "--oneline")
 	if err != nil {
 		log.Error("failed to get commit log", "error", err, "branch", branch)
 		return "", "", fmt.Errorf("failed to get commit log: %w", err)
 	}
 
 	// Get the diff from base branch (use --no-ext-diff to ensure output goes to stdout)
-	diffOutput, err := s.executor.Output(ctx, repoPath, "git", "diff", "--no-ext-diff", fmt.Sprintf("%s...%s", baseBranch, branch))
+	diffOutput, err := s.executor.Output(ctx, repoPath, "git", "diff", "--no-ext-diff", fmt.Sprintf("%s...%s", comparisonRef, branch))
 	if err != nil {
 		log.Error("failed to get diff", "error", err, "branch", branch)
 		return "", "", fmt.Errorf("failed to get diff: %w", err)
