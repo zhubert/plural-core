@@ -62,42 +62,13 @@ const (
 
 // DefaultAllowedTools is the minimal set of safe tools allowed by default.
 // Users can add more tools via global or per-repo config, or by pressing 'a' during sessions.
-var DefaultAllowedTools = []string{
-	// Read-only operations
-	"Read",
-	"Glob",
-	"Grep",
-	// File modifications (core editing workflow)
-	"Edit",
-	"Write",
-	// Planning mode (safe - just signals plan completion for user review)
-	"ExitPlanMode",
-	// Safe read-only shell commands
-	"Bash(ls:*)",
-	"Bash(cat:*)",
-	"Bash(head:*)",
-	"Bash(tail:*)",
-	"Bash(wc:*)",
-	"Bash(pwd:*)",
-}
+// Composed from ToolSetBase + ToolSetSafeShell (see tools.go).
+var DefaultAllowedTools = ComposeTools(ToolSetBase, ToolSetSafeShell)
 
 // containerAllowedTools is a broad set of pre-authorized tools for containerized sessions.
 // The container IS the sandbox, so all tools are safe to use without permission prompts.
-var containerAllowedTools = []string{
-	"Read",
-	"Glob",
-	"Grep",
-	"Edit",
-	"Write",
-	"Bash",
-	"ExitPlanMode",
-	"WebFetch",
-	"WebSearch",
-	"TodoRead",
-	"TodoWrite",
-	"NotebookEdit",
-	"Task",
-}
+// Composed from ToolSetBase + ToolSetContainerShell + ToolSetWeb + ToolSetProductivity (see tools.go).
+var containerAllowedTools = ComposeTools(ToolSetBase, ToolSetContainerShell, ToolSetWeb, ToolSetProductivity)
 
 // Message represents a chat message
 type Message struct {

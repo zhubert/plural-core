@@ -957,12 +957,13 @@ func TestProcessManager_GoroutineExitOnContextCancel(t *testing.T) {
 }
 
 func TestBuildCommandArgs_Containerized_NewSession(t *testing.T) {
+	// Consumer provides container-appropriate tools via AllowedTools
 	config := ProcessConfig{
 		SessionID:      "container-session-uuid",
 		WorkingDir:     "/tmp/worktree",
 		SessionStarted: false,
 		MCPConfigPath:  "/tmp/mcp.json",
-		AllowedTools:   []string{"Read", "Write", "Bash"},
+		AllowedTools:   ComposeTools(ToolSetBase, ToolSetContainerShell, ToolSetWeb, ToolSetProductivity),
 		Containerized:  true,
 		ContainerImage: "my-image",
 	}
@@ -994,7 +995,7 @@ func TestBuildCommandArgs_Containerized_NewSession(t *testing.T) {
 		t.Errorf("--mcp-config = %q, want %q (short container-side path)", got, containerMCPConfigPath)
 	}
 
-	// Must have --allowedTools with broad container tools pre-authorized
+	// Must have --allowedTools from consumer-provided AllowedTools
 	if !containsArg(args, "--allowedTools") {
 		t.Error("Containerized session must have --allowedTools for pre-authorized tools")
 	}
@@ -1016,6 +1017,48 @@ func TestBuildCommandArgs_Containerized_NewSession(t *testing.T) {
 	}
 }
 
+func TestBuildCommandArgs_Containerized_UsesConsumerTools(t *testing.T) {
+	// Verify that BuildCommandArgs uses whatever tools the consumer provides,
+	// rather than hardcoding containerAllowedTools
+	customTools := []string{"Read", "Write", "Bash", "CustomTool"}
+	config := ProcessConfig{
+		SessionID:      "custom-tools-session",
+		WorkingDir:     "/tmp/worktree",
+		SessionStarted: false,
+		MCPConfigPath:  "/tmp/mcp.json",
+		AllowedTools:   customTools,
+		Containerized:  true,
+		ContainerImage: "my-image",
+	}
+
+	args := BuildCommandArgs(config)
+
+	// Verify each consumer-provided tool appears in args
+	for _, tool := range customTools {
+		found := false
+		for i, arg := range args {
+			if arg == "--allowedTools" && i+1 < len(args) && args[i+1] == tool {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("consumer tool %q not found in args", tool)
+		}
+	}
+
+	// Count --allowedTools flags — should match consumer tools count
+	count := 0
+	for _, arg := range args {
+		if arg == "--allowedTools" {
+			count++
+		}
+	}
+	if count != len(customTools) {
+		t.Errorf("expected %d --allowedTools flags, got %d", len(customTools), count)
+	}
+}
+
 func TestBuildCommandArgs_Containerized_NoMCPConfig(t *testing.T) {
 	// When MCPConfigPath is empty (MCP server not started yet),
 	// containerized sessions fall back to --dangerously-skip-permissions
@@ -1024,6 +1067,7 @@ func TestBuildCommandArgs_Containerized_NoMCPConfig(t *testing.T) {
 		WorkingDir:     "/tmp/worktree",
 		SessionStarted: false,
 		MCPConfigPath:  "", // Empty - MCP not configured
+		AllowedTools:   ComposeTools(ToolSetBase, ToolSetContainerShell, ToolSetWeb, ToolSetProductivity),
 		Containerized:  true,
 		ContainerImage: "my-image",
 	}

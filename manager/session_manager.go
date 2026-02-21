@@ -189,8 +189,10 @@ func (sm *SessionManager) Select(sess *config.Session, previousSessionID string,
 	log := logger.WithSession(sess.ID)
 	log.Debug("selecting session", "name", sess.Name)
 
-	// Get or create runner
+	// Get or create runner and apply default policy configuration.
+	// Headless consumers (daemon/agent) skip Select() and configure runners explicitly.
 	runner := sm.GetOrCreateRunner(sess)
+	sm.ConfigureRunnerDefaults(runner, sess)
 
 	// Determine header name (branch if custom, otherwise session name)
 	headerName := sess.Name
@@ -362,6 +364,19 @@ func (sm *SessionManager) GetOrCreateRunner(sess *config.Session) claude.RunnerI
 		}
 	}
 
+	return runner
+}
+
+// ConfigureRunnerDefaults applies default policy configuration to a runner based on
+// the session's properties. This includes tools, supervisor mode, host tools,
+// container mode, MCP servers, and streaming settings.
+//
+// This method is intended for the TUI and other consumers that want the "standard"
+// configuration. Headless consumers (like the daemon/agent) should configure runners
+// explicitly using the runner's Set* methods and the tool catalog in claude/tools.go.
+func (sm *SessionManager) ConfigureRunnerDefaults(runner claude.RunnerInterface, sess *config.Session) {
+	log := logger.WithSession(sess.ID)
+
 	// Build the full allowed tools list: defaults + per-repo config
 	tools := make([]string, len(claude.DefaultAllowedTools))
 	copy(tools, claude.DefaultAllowedTools)
@@ -418,8 +433,6 @@ func (sm *SessionManager) GetOrCreateRunner(sess *config.Session) claude.RunnerI
 		runner.SetDisableStreamingChunks(true)
 		log.Debug("autonomous session, streaming chunks disabled for reduced logging")
 	}
-
-	return runner
 }
 
 // SaveMessages saves the current messages from a runner to disk.
