@@ -275,8 +275,8 @@ func BuildCommandArgs(config ProcessConfig) []string {
 			args = append(args, "--append-system-prompt", config.SystemPrompt)
 		}
 
-		// Pre-authorize all tools — the container is the sandbox
-		for _, tool := range containerAllowedTools {
+		// Pre-authorize tools — consumer is responsible for setting container-appropriate tools
+		for _, tool := range config.AllowedTools {
 			args = append(args, "--allowedTools", tool)
 		}
 	} else {

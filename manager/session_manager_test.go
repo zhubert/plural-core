@@ -1056,7 +1056,74 @@ func TestSessionManager_SaveRunnerMessages_Error(t *testing.T) {
 	}
 }
 
-func TestSessionManager_DaemonManaged_SkipsHostTools(t *testing.T) {
+func TestGetOrCreateRunner_BareRunner(t *testing.T) {
+	// GetOrCreateRunner should return a bare runner with no tools or modes set.
+	// Policy configuration is the consumer's responsibility (via ConfigureRunnerDefaults or explicit calls).
+	cfg := &config.Config{
+		Repos: []string{"/test/repo"},
+		Sessions: []config.Session{
+			{
+				ID:       "bare-session",
+				RepoPath: "/test/repo",
+				WorkTree: "/test/worktree",
+				Branch:   "plural-test",
+				Name:     "repo/session1",
+				Started:  false,
+			},
+		},
+		AllowedTools:     []string{},
+		RepoAllowedTools: make(map[string][]string),
+	}
+	sm := NewSessionManager(cfg, git.NewGitService())
+
+	sm.SetRunnerFactory(func(sessionID, workingDir, repoPath string, sessionStarted bool, initialMessages []claude.Message) claude.RunnerInterface {
+		return claude.NewMockRunner(sessionID, sessionStarted, initialMessages)
+	})
+
+	sess := sm.GetSession("bare-session")
+	runner := sm.GetOrCreateRunner(sess)
+
+	mockRunner, ok := runner.(*claude.MockRunner)
+	if !ok {
+		t.Fatal("Expected MockRunner")
+	}
+
+	// Runner should have no tools set (bare)
+	tools := mockRunner.GetAllowedTools()
+	if len(tools) != 0 {
+		t.Errorf("bare runner should have no tools, got %d: %v", len(tools), tools)
+	}
+}
+
+func TestConfigureRunnerDefaults_SetsTools(t *testing.T) {
+	// ConfigureRunnerDefaults should set DefaultAllowedTools + repo tools
+	cfg := &config.Config{
+		Repos: []string{"/test/repo"},
+		Sessions: []config.Session{
+			{
+				ID:       "session-1",
+				RepoPath: "/test/repo",
+				WorkTree: "/test/worktree",
+			},
+		},
+		AllowedTools:     []string{},
+		RepoAllowedTools: map[string][]string{"/test/repo": {"Bash(git:*)"}},
+	}
+	sm := NewSessionManager(cfg, git.NewGitService())
+
+	runner := claude.NewMockRunner("session-1", false, nil)
+	sess := sm.GetSession("session-1")
+	sm.ConfigureRunnerDefaults(runner, sess)
+
+	tools := runner.GetAllowedTools()
+	// Should have DefaultAllowedTools + repo tool
+	expectedLen := len(claude.DefaultAllowedTools) + 1
+	if len(tools) != expectedLen {
+		t.Errorf("expected %d tools, got %d: %v", expectedLen, len(tools), tools)
+	}
+}
+
+func TestConfigureRunnerDefaults_DaemonManaged_SkipsHostTools(t *testing.T) {
 	// A daemon-managed autonomous supervisor session should NOT get host tools
 	cfg := &config.Config{
 		Repos: []string{"/test/repo"},
@@ -1078,25 +1145,17 @@ func TestSessionManager_DaemonManaged_SkipsHostTools(t *testing.T) {
 	}
 	sm := NewSessionManager(cfg, git.NewGitService())
 
-	sm.SetRunnerFactory(func(sessionID, workingDir, repoPath string, sessionStarted bool, initialMessages []claude.Message) claude.RunnerInterface {
-		return newTrackingMockRunner(sessionID, sessionStarted, initialMessages)
-	})
-
+	runner := newTrackingMockRunner("daemon-session", false, nil)
 	sess := sm.GetSession("daemon-session")
-	result := sm.Select(sess, "", "", "")
-
-	trackingRunner, ok := result.Runner.(*trackingMockRunner)
-	if !ok {
-		t.Fatal("Expected trackingMockRunner")
-	}
+	sm.ConfigureRunnerDefaults(runner, sess)
 
 	// Host tools should NOT be enabled for daemon-managed sessions
-	if trackingRunner.hostToolsEnabled {
+	if runner.hostToolsEnabled {
 		t.Error("daemon-managed session should NOT have host tools enabled")
 	}
 }
 
-func TestSessionManager_NonDaemonManaged_GetsHostTools(t *testing.T) {
+func TestConfigureRunnerDefaults_NonDaemonManaged_GetsHostTools(t *testing.T) {
 	// A non-daemon-managed autonomous supervisor session SHOULD get host tools
 	cfg := &config.Config{
 		Repos: []string{"/test/repo"},
@@ -1118,20 +1177,12 @@ func TestSessionManager_NonDaemonManaged_GetsHostTools(t *testing.T) {
 	}
 	sm := NewSessionManager(cfg, git.NewGitService())
 
-	sm.SetRunnerFactory(func(sessionID, workingDir, repoPath string, sessionStarted bool, initialMessages []claude.Message) claude.RunnerInterface {
-		return newTrackingMockRunner(sessionID, sessionStarted, initialMessages)
-	})
-
+	runner := newTrackingMockRunner("normal-session", false, nil)
 	sess := sm.GetSession("normal-session")
-	result := sm.Select(sess, "", "", "")
-
-	trackingRunner, ok := result.Runner.(*trackingMockRunner)
-	if !ok {
-		t.Fatal("Expected trackingMockRunner")
-	}
+	sm.ConfigureRunnerDefaults(runner, sess)
 
 	// Host tools SHOULD be enabled for non-daemon-managed autonomous supervisors
-	if !trackingRunner.hostToolsEnabled {
+	if !runner.hostToolsEnabled {
 		t.Error("non-daemon-managed autonomous supervisor session SHOULD have host tools enabled")
 	}
 }
