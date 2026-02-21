@@ -790,13 +790,23 @@ func TestCreatePR_UsesBaseBranchNotDefaultBranch(t *testing.T) {
 		Stdout: []byte("Branch pushed successfully\n"),
 	})
 
-	// Mock git log for PR generation (baseBranch..branch)
-	mockExec.AddPrefixMatch("git", []string{"log", baseBranch + ".." + branch, "--oneline"}, pexec.MockResponse{
+	// Mock git fetch for PR generation (fetches baseBranch from origin)
+	mockExec.AddPrefixMatch("git", []string{"fetch", "origin", baseBranch}, pexec.MockResponse{
+		Stdout: []byte(""),
+	})
+
+	// Mock git rev-parse to verify origin/parent-branch exists
+	mockExec.AddPrefixMatch("git", []string{"rev-parse", "--verify", "origin/" + baseBranch}, pexec.MockResponse{
+		Stdout: []byte("abc123\n"),
+	})
+
+	// Mock git log for PR generation (uses origin/baseBranch..branch after fetch)
+	mockExec.AddPrefixMatch("git", []string{"log", "origin/" + baseBranch + ".." + branch, "--oneline"}, pexec.MockResponse{
 		Stdout: []byte("abc123 Add new feature\n"),
 	})
 
-	// Mock git diff for PR generation (using baseBranch)
-	mockExec.AddPrefixMatch("git", []string{"diff", baseBranch + "..." + branch}, pexec.MockResponse{
+	// Mock git diff for PR generation (uses origin/baseBranch)
+	mockExec.AddPrefixMatch("git", []string{"diff", "origin/" + baseBranch + "..." + branch}, pexec.MockResponse{
 		Stdout: []byte("diff --git a/file.txt b/file.txt\n"),
 	})
 
@@ -2516,13 +2526,23 @@ func TestGeneratePRTitleAndBodyWithBaseBranch(t *testing.T) {
 	mockExec := pexec.NewMockExecutor(nil)
 	svc := NewGitServiceWithExecutor(mockExec)
 
-	// Mock git log to return commits
-	mockExec.AddPrefixMatch("git", []string{"log", "feature-base..feature-branch", "--oneline"}, pexec.MockResponse{
+	// Mock git fetch origin feature-base
+	mockExec.AddPrefixMatch("git", []string{"fetch", "origin", "feature-base"}, pexec.MockResponse{
+		Stdout: []byte(""),
+	})
+
+	// Mock git rev-parse --verify origin/feature-base (succeeds → use remote ref)
+	mockExec.AddPrefixMatch("git", []string{"rev-parse", "--verify", "origin/feature-base"}, pexec.MockResponse{
+		Stdout: []byte("abc123\n"),
+	})
+
+	// Mock git log to return commits (uses origin/feature-base after successful fetch)
+	mockExec.AddPrefixMatch("git", []string{"log", "origin/feature-base..feature-branch", "--oneline"}, pexec.MockResponse{
 		Stdout: []byte("abc123 Add feature Y\n"),
 	})
 
-	// Mock git diff to return a simple diff
-	mockExec.AddPrefixMatch("git", []string{"diff", "--no-ext-diff", "feature-base...feature-branch"}, pexec.MockResponse{
+	// Mock git diff to return a simple diff (uses origin/feature-base)
+	mockExec.AddPrefixMatch("git", []string{"diff", "--no-ext-diff", "origin/feature-base...feature-branch"}, pexec.MockResponse{
 		Stdout: []byte(`diff --git a/file.txt b/file.txt
 index 1234567..abcdefg 100644
 --- a/file.txt
@@ -2566,27 +2586,27 @@ This PR adds feature Y to the codebase.
 		t.Errorf("Expected body to contain 'feature Y', got: %s", body)
 	}
 
-	// Verify that the git log and diff commands used the baseBranch parameter
+	// Verify that git log and diff used origin/feature-base (remote ref, not local)
 	calls := mockExec.GetCalls()
 
 	var foundLogWithBase, foundDiffWithBase bool
 	for _, call := range calls {
 		if call.Name == "git" && len(call.Args) > 1 {
-			if call.Args[0] == "log" && len(call.Args) > 1 && call.Args[1] == "feature-base..feature-branch" {
+			if call.Args[0] == "log" && len(call.Args) > 1 && call.Args[1] == "origin/feature-base..feature-branch" {
 				foundLogWithBase = true
 			}
-			if call.Args[0] == "diff" && len(call.Args) > 2 && call.Args[2] == "feature-base...feature-branch" {
+			if call.Args[0] == "diff" && len(call.Args) > 2 && call.Args[2] == "origin/feature-base...feature-branch" {
 				foundDiffWithBase = true
 			}
 		}
 	}
 
 	if !foundLogWithBase {
-		t.Error("Expected git log command to use baseBranch 'feature-base'")
+		t.Error("Expected git log command to use remote ref 'origin/feature-base'")
 	}
 
 	if !foundDiffWithBase {
-		t.Error("Expected git diff command to use baseBranch 'feature-base'")
+		t.Error("Expected git diff command to use remote ref 'origin/feature-base'")
 	}
 }
 
@@ -2600,13 +2620,23 @@ func TestGeneratePRTitleAndBodyWithEmptyBaseBranch(t *testing.T) {
 		Stdout: []byte("refs/remotes/origin/main\n"),
 	})
 
-	// Mock git log with main as base
-	mockExec.AddPrefixMatch("git", []string{"log", "main..feature-branch", "--oneline"}, pexec.MockResponse{
+	// Mock git fetch origin main
+	mockExec.AddPrefixMatch("git", []string{"fetch", "origin", "main"}, pexec.MockResponse{
+		Stdout: []byte(""),
+	})
+
+	// Mock git rev-parse --verify origin/main (succeeds → use remote ref)
+	mockExec.AddPrefixMatch("git", []string{"rev-parse", "--verify", "origin/main"}, pexec.MockResponse{
+		Stdout: []byte("abc123\n"),
+	})
+
+	// Mock git log with origin/main as base (uses remote ref after fetch)
+	mockExec.AddPrefixMatch("git", []string{"log", "origin/main..feature-branch", "--oneline"}, pexec.MockResponse{
 		Stdout: []byte("abc123 Add feature\n"),
 	})
 
-	// Mock git diff
-	mockExec.AddPrefixMatch("git", []string{"diff", "--no-ext-diff", "main...feature-branch"}, pexec.MockResponse{
+	// Mock git diff (uses origin/main)
+	mockExec.AddPrefixMatch("git", []string{"diff", "--no-ext-diff", "origin/main...feature-branch"}, pexec.MockResponse{
 		Stdout: []byte("diff --git a/file.txt b/file.txt\n"),
 	})
 
@@ -2627,20 +2657,74 @@ func TestGeneratePRTitleAndBodyWithEmptyBaseBranch(t *testing.T) {
 		t.Errorf("Expected title 'feat: add feature', got '%s'", title)
 	}
 
-	// Verify that it fell back to using main
+	// Verify that it fell back to default branch then used origin/main (remote ref)
 	calls := mockExec.GetCalls()
 
-	var foundLogWithMain bool
+	var foundLogWithOriginMain bool
 	for _, call := range calls {
 		if call.Name == "git" && len(call.Args) > 1 && call.Args[0] == "log" {
-			if strings.Contains(call.Args[1], "main") {
-				foundLogWithMain = true
+			if strings.Contains(call.Args[1], "origin/main") {
+				foundLogWithOriginMain = true
 			}
 		}
 	}
 
-	if !foundLogWithMain {
-		t.Error("Expected to fall back to default branch 'main' when baseBranch is empty")
+	if !foundLogWithOriginMain {
+		t.Error("Expected to fall back to remote ref 'origin/main' when baseBranch is empty")
+	}
+}
+
+func TestGeneratePRTitleAndBodyFallsBackToLocalWhenFetchFails(t *testing.T) {
+	// When git fetch fails (e.g., local-only repo), should fall back to local baseBranch
+	mockExec := pexec.NewMockExecutor(nil)
+	svc := NewGitServiceWithExecutor(mockExec)
+
+	// Mock git fetch origin main (fails — no remote)
+	mockExec.AddPrefixMatch("git", []string{"fetch", "origin", "main"}, pexec.MockResponse{
+		Stderr: []byte("fatal: 'origin' does not appear to be a git repository"),
+		Err:    fmt.Errorf("exit status 128"),
+	})
+
+	// Mock git log with local main as base (fallback when fetch fails)
+	mockExec.AddPrefixMatch("git", []string{"log", "main..feature-branch", "--oneline"}, pexec.MockResponse{
+		Stdout: []byte("abc123 Add feature\n"),
+	})
+
+	// Mock git diff with local main
+	mockExec.AddPrefixMatch("git", []string{"diff", "--no-ext-diff", "main...feature-branch"}, pexec.MockResponse{
+		Stdout: []byte("diff --git a/file.txt b/file.txt\n"),
+	})
+
+	// Mock Claude response
+	mockExec.AddPrefixMatch("claude", []string{"--print", "-p"}, pexec.MockResponse{
+		Stdout: []byte("---TITLE---\nfeat: add feature\n---BODY---\nTest PR"),
+	})
+
+	ctx := context.Background()
+	title, _, err := svc.GeneratePRTitleAndBodyWithIssueRef(ctx, "/test/repo", "feature-branch", "main", nil)
+
+	if err != nil {
+		t.Fatalf("GeneratePRTitleAndBodyWithIssueRef failed: %v", err)
+	}
+
+	if title != "feat: add feature" {
+		t.Errorf("Expected title 'feat: add feature', got '%s'", title)
+	}
+
+	// Verify that it fell back to local main (not origin/main)
+	calls := mockExec.GetCalls()
+
+	var foundLogWithLocalMain bool
+	for _, call := range calls {
+		if call.Name == "git" && len(call.Args) > 1 && call.Args[0] == "log" {
+			if call.Args[1] == "main..feature-branch" {
+				foundLogWithLocalMain = true
+			}
+		}
+	}
+
+	if !foundLogWithLocalMain {
+		t.Error("Expected to fall back to local 'main' when fetch fails")
 	}
 }
 
